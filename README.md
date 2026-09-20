@@ -1,1 +1,1 @@
-(https://github.com/StephanosDaza/st-2026-2-tarea1-herramientas-daza_palomino-esteban)
+https://github.com/StephanosDaza/st-2026-2-tarea1-herramientas-daza_palomino-esteban
