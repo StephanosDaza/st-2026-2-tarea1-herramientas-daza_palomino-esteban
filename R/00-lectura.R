@@ -16,14 +16,12 @@ leer_serie <- function(x, fuente, unidad) {
     } else if (freq == 12) {
       fechas <- seq(as.Date(paste0(anio_ini, "-", ciclo_ini, "-01")), by = "month", length.out = n)
     } else {
-      stop("Frecuencia no soportada para conversión de ts a Date.")
+      stop("Frecuencia no soportada para conversion de ts a Date.")
     }
-    
     df <- tibble(t = 1:n, fecha = fechas, y = as.numeric(x))
     
   } else if (is.character(x)) {
-    if (!file.exists(x)) stop("El archivo CSV no existe en la ruta.")
-    
+    if (!file.exists(x)) stop("El archivo CSV no existe.")
     datos <- read.csv(x)
     if (!all(c("fecha", "valor") %in% colnames(datos))) {
       stop("El CSV debe tener exactamente las columnas 'fecha' y 'valor'.")
@@ -31,37 +29,26 @@ leer_serie <- function(x, fuente, unidad) {
     
     fechas <- as.Date(datos$fecha)
     n <- nrow(datos)
-    
     df <- tibble(t = 1:n, fecha = fechas, y = as.numeric(datos$valor))
     
     dias_diff <- as.numeric(diff(fechas))
     mediana_dias <- median(dias_diff, na.rm = TRUE)
     
-    if (mediana_dias >= 360) {
-      freq <- 1
-    } else if (mediana_dias >= 85 && mediana_dias <= 95) {
-      freq <- 4
-    } else if (mediana_dias >= 28 && mediana_dias <= 31) {
-      freq <- 12
-    } else if (mediana_dias == 1) {
-      freq <- 365
-    } else {
-      stop("No se pudo inferir la frecuencia desde el CSV.")
-    }
+    if (mediana_dias >= 360) { freq <- 1
+    } else if (mediana_dias >= 85 && mediana_dias <= 95) { freq <- 4
+    } else if (mediana_dias >= 28 && mediana_dias <= 31) { freq <- 12
+    } else if (mediana_dias == 1) { freq <- 365
+    } else { stop("No se pudo inferir la frecuencia.") }
   } else {
-    stop("El objeto x debe ser ts o una ruta a un csv.")
+    stop("x debe ser un ts o la ruta a un csv.")
   }
   
-  if (any(diff(df$fecha) <= 0)) {
-    stop("Fechas no estrictamente crecientes.")
-  }
+  if (any(is.na(df$y))) stop("La serie contiene valores faltantes (NA).")
+  if (any(diff(df$fecha) <= 0)) stop("Las fechas no son estrictamente crecientes.")
   
   paso <- if (freq == 1) "year" else if (freq == 4) "quarter" else if (freq == 12) "month" else "day"
   fecha_esperada <- seq(df$fecha[1], by = paso, length.out = n)
-  
-  if (!all(df$fecha == fecha_esperada)) {
-    stop("Fechas sin equiespaciamiento correcto.")
-  }
+  if (!all(df$fecha == fecha_esperada)) stop("Las fechas no estan equiespaciadas correctamente.")
   
   attr(df, "frecuencia") <- freq
   attr(df, "fuente") <- fuente

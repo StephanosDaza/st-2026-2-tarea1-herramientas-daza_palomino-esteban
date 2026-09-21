@@ -155,7 +155,3 @@ optimizar <- function(y, metodo, rejilla) {
   
   return(list(rejilla = rejilla, optimo = optimo))
 }
-
-
-
-

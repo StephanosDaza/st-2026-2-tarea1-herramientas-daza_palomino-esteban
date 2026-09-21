@@ -5,7 +5,6 @@ medidas <- function(y, yhat, naive_mae = NULL) {
   idx <- !is.na(y) & !is.na(yhat)
   y_c <- y[idx]
   yhat_c <- yhat[idx]
-  
   e <- y_c - yhat_c
   
   mse <- mean(e^2)
@@ -16,10 +15,10 @@ medidas <- function(y, yhat, naive_mae = NULL) {
   return(c(MSE = mse, MAD = mad, MAPE = mape, MASE = mase))
 }
 
-ljung_box <- function(r, T_obs, m, p = 0) {
+ljung_box <- function(r, T, m, p = 0) {
   if (m <= p) stop("m debe ser mayor que p.")
   
-  Qm <- T_obs * (T_obs + 2) * sum((r[1:m]^2) / (T_obs - (1:m)))
+  Qm <- T * (T + 2) * sum((r[1:m]^2) / (T - (1:m)))
   df <- m - p
   cv <- qchisq(0.95, df)
   pval <- 1 - pchisq(Qm, df)
@@ -51,7 +50,7 @@ jarque_bera <- function(e) {
 durbin_watson <- function(e) {
   e <- e[!is.na(e)]
   N <- length(e)
-  if (N < 2) stop("Datos insuficientes para DW.")
+  if (N < 2) stop("Datos insuficientes.")
   
   diff_e <- e[2:N] - e[1:(N-1)]
   d <- sum(diff_e^2) / sum(e^2)
@@ -59,18 +58,19 @@ durbin_watson <- function(e) {
   return(list(estadistico = d))
 }
 
-validar_errores <- function(e, m = NULL, p = 0) {
+validar_errores <- function(e, yhat = NULL, m = NULL, p = 0) {
   e_clean <- e[!is.na(e)]
   N <- length(e_clean)
-  if (N < 2) stop("Datos insuficientes en validar_errores.")
-  
+  if (N < 2) stop("Datos insuficientes.")
   if (is.null(m)) m <- min(floor(N / 4), 24)
   
   t_stat <- sqrt(N) * mean(e_clean) / sd(e_clean)
-  t_cv <- qt(0.975, df = N - 1)
-  t_pval <- 2 * (1 - pt(abs(t_stat), df = N - 1))
-  
-  t_test <- list(estadistico = t_stat, grados_libertad = N - 1, valor_critico = t_cv, valor_p = t_pval)
+  t_test <- list(
+    estadistico = t_stat, 
+    grados_libertad = N - 1, 
+    valor_critico = qt(0.975, df = N - 1), 
+    valor_p = 2 * (1 - pt(abs(t_stat), df = N - 1))
+  )
   
   y_bar <- mean(e_clean)
   var_y <- sum((e_clean - y_bar)^2) / N 
@@ -79,26 +79,28 @@ validar_errores <- function(e, m = NULL, p = 0) {
     acf_vals[h] <- sum((e_clean[1:(N-h)] - y_bar) * (e_clean[(1+h):N] - y_bar)) / N / var_y
   }
   
-  lb <- ljung_box(acf_vals, N, m, p)
+  lb <- ljung_box(acf_vals, T = N, m = m, p = p)
   jb <- jarque_bera(e_clean)
   dw <- durbin_watson(e_clean)
   
   df_e <- data.frame(t = 1:N, e = e_clean)
   p_time <- ggplot(df_e, aes(x = t, y = e)) +
     geom_line(color = "darkred") +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
-    labs(title = "Errores en el tiempo", x = "Indice", y = "Error") +
-    theme_minimal()
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    labs(title = "Errores en el tiempo", x = "Indice", y = "Error") + theme_minimal()
   
   p_acf_pacf <- correlograma(e_clean, m)
-  graficos <- p_time / p_acf_pacf + plot_layout(heights = c(1, 2))
   
-  return(list(
-    n_errores = N,
-    prueba_t_media = t_test,
-    ljung_box = lb,
-    jarque_bera = jb,
-    durbin_watson = dw,
-    graficos = graficos
-  ))
+  if (!is.null(yhat)) {
+    df_res <- data.frame(yhat = yhat[!is.na(e)], e = e_clean)
+    p_res <- ggplot(df_res, aes(x = yhat, y = e)) +
+      geom_point(color = "blue", alpha = 0.5) +
+      geom_hline(yintercept = 0, linetype = "dashed") +
+      labs(title = "Residuos vs Ajustados", x = "Valores Ajustados", y = "Residuos") + theme_minimal()
+    graficos <- (p_time | p_res) / p_acf_pacf + plot_layout(heights = c(1, 2))
+  } else {
+    graficos <- p_time / p_acf_pacf + plot_layout(heights = c(1, 2))
+  }
+  
+  return(list(n_errores = N, prueba_t_media = t_test, ljung_box = lb, jarque_bera = jb, durbin_watson = dw, graficos = graficos))
 }
