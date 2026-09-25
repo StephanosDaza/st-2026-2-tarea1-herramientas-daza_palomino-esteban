@@ -21,7 +21,7 @@ graficar_serie <- function(datos, titulo) {
       y = unidad_texto,
       caption = paste0("Fuente: ", fuente_texto, " | Numero de observaciones: ", n)
     ) +
-    scale_x_date(date_labels = "%Y-%m", date_breaks = "auto") +
+    scale_x_date(date_labels = "%Y-%m") +
     theme_minimal() +
     theme(
       plot.title = element_text(face = "bold"),
