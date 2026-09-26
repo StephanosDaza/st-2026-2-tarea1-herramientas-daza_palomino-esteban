@@ -2,9 +2,11 @@ library(ggplot2)
 library(patchwork)
 
 graficar_serie <- function(datos, titulo) {
-  if (!is.data.frame(datos) || !all(c("fecha", "y") %in% names(datos))) {
-    stop("datos debe ser el tibble generado por leer_serie.")
-  }
+  stopifnot(
+    "datos debe ser el tibble generado por leer_serie" =
+      is.data.frame(datos) && all(c("fecha", "y") %in% names(datos)),
+    "titulo debe ser un texto" = is.character(titulo) && length(titulo) == 1
+  )
   
   fuente <- attr(datos, "fuente")
   unidad <- attr(datos, "unidad")
@@ -32,34 +34,48 @@ graficar_serie <- function(datos, titulo) {
   return(p)
 }
 
+acf_muestral <- function(y, m) {
+  stopifnot(
+    "y debe ser un vector numerico" = is.numeric(y),
+    "y no puede tener NA" = !anyNA(y),
+    "m debe ser un entero entre 1 y n - 1" =
+      length(m) == 1 && m == round(m) && m >= 1 && m < length(y)
+  )
+  n <- length(y)
+  y_bar <- mean(y)
+  c0 <- sum((y - y_bar)^2) / n
+  r <- numeric(m)
+  for (h in 1:m) {
+    r[h] <- sum((y[1:(n - h)] - y_bar) * (y[(1 + h):n] - y_bar)) / n / c0
+  }
+  return(r)
+}
+
+banda_ruido_blanco <- function(n, ci = 0.95) {
+  stopifnot("n debe ser positivo" = n > 0, "ci debe estar en (0, 1)" = ci > 0 && ci < 1)
+  qnorm((1 + ci) / 2) / sqrt(n)
+}
+
 correlograma <- function(datos, m = NULL) {
   if (is.data.frame(datos) && "y" %in% names(datos)) {
     y <- datos$y
-  } else if (is.numeric(datos)) {
-    y <- datos
   } else {
-    stop("datos debe ser un tibble o un vector numerico.")
+    stopifnot("datos debe ser un tibble con columna y o un vector numerico" = is.numeric(datos))
+    y <- datos
   }
   
   y_clean <- y[!is.na(y)]
   n <- length(y_clean)
   
   if (is.null(m)) m <- min(floor(n / 4), 24)
-  if (m <= 0 || m >= n) stop("m esta fuera de rango.")
+  stopifnot("m esta fuera de rango" = m > 0 && m < n)
   
-  y_bar <- mean(y_clean)
-  var_y <- sum((y_clean - y_bar)^2) / n 
-  
-  acf_vals <- numeric(m)
-  for (h in 1:m) {
-    cov_h <- sum((y_clean[1:(n-h)] - y_bar) * (y_clean[(1+h):n] - y_bar)) / n
-    acf_vals[h] <- cov_h / var_y
-  }
+  acf_vals <- acf_muestral(y_clean, m)
   
   pacf_obj <- stats::pacf(y_clean, lag.max = m, plot = FALSE)
   pacf_vals <- as.numeric(pacf_obj$acf)[1:m]
   
-  climo <- qnorm((1 + 0.95) / 2) / sqrt(n)
+  climo <- banda_ruido_blanco(n)
   
   df_acf <- data.frame(lag = 1:m, acf = acf_vals)
   df_pacf <- data.frame(lag = 1:m, pacf = pacf_vals)
@@ -81,4 +97,42 @@ correlograma <- function(datos, m = NULL) {
     theme_bw()
   
   return(p_acf / p_pacf)
+}
+
+graficar_optimizacion <- function(opt, titulo) {
+  stopifnot(
+    "opt debe ser la salida de optimizar()" =
+      is.list(opt) && all(c("rejilla", "optimo") %in% names(opt))
+  )
+  rej <- opt$rejilla
+  op <- opt$optimo
+  pars <- setdiff(names(rej), "mse")
+  
+  if (length(pars) == 1) {
+    df <- data.frame(x = rej[[pars[1]]], mse = rej$mse)
+    df_op <- data.frame(x = op[[pars[1]]], mse = op$mse)
+    p <- ggplot(df, aes(x = x, y = mse)) +
+      geom_line(color = "steelblue") +
+      geom_point(color = "steelblue", size = 1.2) +
+      geom_vline(xintercept = df_op$x, linetype = "dashed", color = "darkred") +
+      geom_point(data = df_op, color = "darkred", size = 3) +
+      labs(title = titulo,
+           subtitle = sprintf("Optimo: %s = %s, MSE = %.4f", pars[1], format(df_op$x), df_op$mse),
+           x = pars[1], y = "MSE de un paso (tramo de estimacion)") +
+      theme_minimal()
+  } else {
+    df <- data.frame(a = rej[[pars[1]]], b = rej[[pars[2]]], mse = rej$mse)
+    df_op <- data.frame(a = op[[pars[1]]], b = op[[pars[2]]])
+    p <- ggplot(df, aes(x = a, y = b, fill = mse)) +
+      geom_tile() +
+      scale_fill_viridis_c(name = "MSE") +
+      geom_point(data = df_op, aes(x = a, y = b), inherit.aes = FALSE,
+                 shape = 4, size = 5, stroke = 1.5, color = "red") +
+      labs(title = titulo,
+           subtitle = sprintf("Optimo: %s = %.2f, %s = %.2f, MSE = %.4f",
+                              pars[1], df_op$a, pars[2], df_op$b, op$mse),
+           x = pars[1], y = pars[2]) +
+      theme_minimal()
+  }
+  return(p)
 }

@@ -1,0 +1,465 @@
+---
+title: "Tarea 1: Herramientas de Pronóstico y Métodos de Suavizamiento"
+author: "Esteban Daza Palomino"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-title: "Contenido"
+    toc-location: left
+    theme: cosmo
+    embed-resources: true
+    code-fold: true
+    code-summary: "Ver código"
+    fig-align: center
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup-directorio
+#| include: false
+
+# Directorio de trabajo en la raiz del proyecto
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r}
+#| label: setup-ejecucion
+#| include: false
+
+# Corrida completa de ejemplos.R (figuras en figs/ y salida de consola)
+salida_ejemplos <- capture.output(source("ejemplos/ejemplos.R", encoding = "UTF-8"))
+```
+
+## Introducción
+
+Este informe presenta el análisis completo de los ocho métodos de pronóstico univariado exigidos. Los cálculos, optimizaciones y validaciones fueron ejecutados en el script `ejemplos/ejemplos.R` (que a su vez usa las funciones de la carpeta `R/`), y los resultados se exponen a continuación siguiendo rigurosamente el protocolo de evaluación extramuestral ($h = \min\{12, \lfloor 0.2T \rfloor\}$) y las pruebas de hipótesis exigidas en 6 pasos.
+
+Para cada método se presentan tres figuras generadas por el protocolo: la serie original con su correlograma, el diagnóstico gráfico de los errores de ajuste, y la comparación entre la serie original, el ajuste dentro de muestra y el pronóstico extramuestral.
+
+---
+
+## 1. Media Simple (Contraejemplo)
+
+```{r}
+#| label: m01-media-simple
+#| eval: false
+ejecutar_protocolo("AirPassengers", datasets::AirPassengers, "Box & Jenkins (1976)", "Miles de pasajeros",
+                   "ajustar_media", "Media Simple (Contraejemplo)", p_params = 0, prefijo = "01")
+```
+
+### Descripción de la serie
+
+La serie `AirPassengers` mide el número de pasajeros aéreos en miles. Tiene frecuencia mensual (12), rango de enero de 1949 a diciembre de 1960, con $N = 144$ observaciones.
+
+![AirPassengers: serie original y correlograma](../figs/01_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+El gráfico muestra una fuerte tendencia alcista y estacionalidad multiplicativa.
+
+**Prueba de Ljung-Box (Serie original, $m=24, p=0$)**
+
+- $H_0$: Rezagos independientes (ruido blanco). / $H_1$: Autocorrelación presente.
+- Estadístico: $Q_m \sim \chi^2_{24}$.
+- Región de rechazo al 5%: $Q_m > 36.41$.
+- Valor observado: $Q_m = 1606.084$, valor p $= 0$.
+- Decisión: Rechazar $H_0$.
+- Lectura: La serie posee una estructura de dependencia altísima.
+
+### Validación de errores ($N = 131$)
+
+![Media Simple: diagnóstico de los errores](../figs/01_err.png){width=90%}
+
+**Prueba t de media cero**
+
+- $H_0: \mu_e = 0$ / $H_1: \mu_e \neq 0$
+- Estadístico: $t \sim t_{130}$.
+- Región de rechazo 5%: $|t| > 1.978$.
+- Valor observado: $t = 13.567$, valor p $= 0$.
+- Decisión: Rechazar $H_0$.
+- Lectura: Errores sistemáticamente sesgados.
+
+**Prueba de Ljung-Box (Errores, $m=24, p=0$)**
+
+- $H_0$: Residuales independientes. / $H_1$: Residuales correlacionados.
+- Estadístico: $Q_m \sim \chi^2_{24}$.
+- Región de rechazo: $Q_m > 36.41$.
+- Valor observado: $Q_m = 869.61$, valor p $= 0$.
+- Decisión: Rechazar $H_0$.
+- Lectura: Queda fuerte autocorrelación no capturada.
+
+**Prueba de Jarque-Bera**
+
+- $H_0$: Residuales normales. / $H_1$: Residuales no normales.
+- Estadístico: $JB \sim \chi^2_2$.
+- Región de rechazo: $JB > 5.99$.
+- Valor observado: $JB = 23.48$, valor p $= 7.96 \times 10^{-6}$.
+- Decisión: Rechazar $H_0$.
+- Lectura: Los errores no se distribuyen normal.
+
+**Durbin-Watson:** $d = 0.086$. Cercano a 0, fuerte autocorrelación positiva.
+
+### Conclusión
+
+![Media Simple: ajuste y pronóstico extramuestral](../figs/01_fin.png){width=80%}
+
+Se ajustó el método de Media Simple ($h=12$). En el tramo extramuestral, alcanzó un MAD de 213.67, siendo ampliamente superado por el referente ingenuo (MAD de 30.45, generando un MASE de 7.01). Se violan todos los supuestos de error.
+
+### Recomendación (Contraejemplo del literal 4e)
+
+Este es el contraejemplo obligatorio. Este pronóstico no tiene utilidad práctica. Su límite es inmediato ($h=1$), ya que al promediar todo el pasado ignora la tendencia. Las cifras demuestran el fracaso: el modelo falla por 213.67 miles de pasajeros mensuales en validación, evidenciando que contradice abiertamente el patrón de la serie.
+
+---
+
+## 2. Media Móvil
+
+```{r}
+#| label: m02-media-movil
+#| eval: false
+ejecutar_protocolo("discoveries", datasets::discoveries, "World Almanac", "Numero de descubrimientos",
+                   "ajustar_mm", "Media Movil", p_params = 0, prefijo = "02", param_rejilla = 2:12)
+```
+
+### Descripción de la serie
+
+La serie `discoveries` registra descubrimientos importantes. Frecuencia anual, rango 1860 a 1959, $N = 100$.
+
+![discoveries: serie original y correlograma](../figs/02_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+La serie parece fluctuar alrededor de un nivel localmente estable.
+
+**Prueba de Ljung-Box (Serie original, $m=24, p=0$)**
+
+- $H_0$: Ruido blanco. / $H_1$: Autocorrelación presente.
+- Estadístico: $Q_m \sim \chi^2_{24}$.
+- Región de rechazo al 5%: $Q_m > 36.41$.
+- Valor observado: $Q_m = 36.25$, valor p $= 0.0518$.
+- Decisión: No se rechaza $H_0$ al 5% (marginal).
+- Lectura: La serie roza el comportamiento de ruido blanco con leves fluctuaciones locales.
+
+### Validación de errores ($N = 79$)
+
+![Media Móvil: diagnóstico de los errores](../figs/02_err.png){width=90%}
+
+**Prueba t de media cero**
+
+- $H_0: \mu_e = 0$ / $H_1: \mu_e \neq 0$
+- Estadístico: $t \sim t_{78}$.
+- Región de rechazo 5%: $|t| > 1.99$.
+- Valor observado: $t = -0.229$, valor p $= 0.818$.
+- Decisión: No rechazar $H_0$.
+- Lectura: Errores sin sesgo.
+
+**Prueba de Ljung-Box (Errores, $m=19, p=0$)**
+
+- $H_0$: Residuales independientes. / $H_1$: Residuales correlacionados.
+- Estadístico: $Q_m \sim \chi^2_{19}$.
+- Región de rechazo: $Q_m > 30.14$.
+- Valor observado: $Q_m = 17.00$, valor p $= 0.589$.
+- Decisión: No rechazar $H_0$.
+- Lectura: Los errores son ruido blanco.
+
+**Prueba de Jarque-Bera**
+
+- $H_0$: Residuales normales. / $H_1$: Residuales no normales.
+- Estadístico: $JB \sim \chi^2_2$.
+- Región de rechazo: $JB > 5.99$.
+- Valor observado: $JB = 22.54$, valor p $= 1.26 \times 10^{-5}$.
+- Decisión: Rechazar $H_0$.
+- Lectura: Colas pesadas o asimetría, viola normalidad.
+
+**Durbin-Watson:** $d = 1.68$. Sin evidencia crítica de autocorrelación de rezago 1.
+
+### Conclusión
+
+![Media Móvil: ajuste y pronóstico extramuestral](../figs/02_fin.png){width=80%}
+
+Se ajustó una Media Móvil con ventana óptima $k=9$. En el tramo extramuestral ($h=12$), el modelo superó al referente ingenuo (MAD de 1.25 frente a 2.12 del ingenuo), logrando un MASE excelente de 0.587. (El MAPE da `Inf` por valores cero en la serie). La media cero y la independencia de errores se cumplen, aunque falla la normalidad.
+
+### Recomendación
+
+Este modelo sirve para estimar la tasa promedio subyacente de descubrimientos anuales para historiadores de la ciencia. Es recomendable para horizontes cortos ($h=1$ a $h=3$), ya que asume que el nivel se congela. El límite del modelo es que reacciona lento ante ráfagas súbitas de innovación, errando por un promedio absoluto de 1.25 descubrimientos al año.
+
+---
+
+## 3. Suavizamiento Exponencial Simple (SES)
+
+```{r}
+#| label: m03-ses
+#| eval: false
+ejecutar_protocolo("Nile", datasets::Nile, "Durbin & Koopman", "Flujo (10^8 m^3)",
+                   "ajustar_ses", "Suavizamiento Exponencial Simple", p_params = 1, prefijo = "03",
+                   param_rejilla = seq(0.02, 0.98, by = 0.02))
+```
+
+### Descripción de la serie
+
+La serie `Nile` mide el flujo del río. Frecuencia anual, 1871 a 1970, $N = 100$.
+
+![Nile: serie original y correlograma](../figs/03_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+**Ljung-Box (Serie, $p=0$):** $Q_{24} = 130.18$ ($p \approx 0$). Se rechaza $H_0$, confirmando dependencia temporal. El fuerte quiebre de nivel en 1898 justifica el uso de SES, que adapta su nivel.
+
+### Validación de errores ($N = 87$)
+
+![SES: diagnóstico de los errores](../figs/03_err.png){width=90%}
+
+- **Prueba t de media cero:** $t = -0.700$ ($gl=86$, $p = 0.485$). No se rechaza $H_0$. Sin sesgo.
+- **Ljung-Box (Errores, $m=21, p=1$):** $Q_{20} = 17.75$ ($p = 0.603$). No se rechaza $H_0$. Errores independientes.
+- **Jarque-Bera:** $JB = 0.33$ ($p = 0.847$). No se rechaza $H_0$. Errores normales.
+- **Durbin-Watson:** $d = 1.69$.
+
+### Conclusión
+
+![SES: ajuste y pronóstico extramuestral](../figs/03_fin.png){width=80%}
+
+Se optimizó el SES alcanzando $\alpha = 0.24$. En validación ($h=12$), logró un MAD de 107.11 (MAPE 12.60%), superando al ingenuo (MAD de 132.86, logrando un MASE de 0.806). Los supuestos del modelo (media cero, ruido blanco y normalidad) se cumplen perfectamente.
+
+### Recomendación
+
+Ideal para ingenieros hidrológicos. Es útil en horizontes de $h=1$ a $h=5$ años debido al componente aleatorio del clima. Su límite reside en que no modela ciclos climáticos multianuales, errando en la estimación del flujo por $107.11 \times 10^8 \, m^3$ anuales.
+
+---
+
+## 4. Doble Media Móvil
+
+```{r}
+#| label: m04-dmm
+#| eval: false
+ejecutar_protocolo("WWWusage", datasets::WWWusage, "Durbin & Koopman", "Usuarios por minuto",
+                   "ajustar_dmm", "Doble Media Movil", p_params = 0, prefijo = "04", param_rejilla = 2:12)
+```
+
+### Descripción de la serie
+
+La serie `WWWusage` mide usuarios de internet por minuto. Frecuencia de minuto, $N = 100$.
+
+![WWWusage: serie original y correlograma](../figs/04_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+**Ljung-Box (Serie, $p=0$):** $Q_{24} = 647.79$ ($p = 0$). Se rechaza $H_0$. La serie tiene tendencias estocásticas locales evidentes que cambian de dirección, justificando la DMM.
+
+### Validación de errores ($N = 85$)
+
+![Doble Media Móvil: diagnóstico de los errores](../figs/04_err.png){width=90%}
+
+- **Prueba t de media cero:** $t = 0.237$ ($gl=84$, $p = 0.812$). No se rechaza $H_0$.
+- **Ljung-Box (Errores, $m=21, p=0$):** $Q_{21} = 63.26$ ($p = 4.04 \times 10^{-6}$). Se rechaza $H_0$. Queda autocorrelación por dinámicas complejas del tráfico.
+- **Jarque-Bera:** $JB = 1.22$ ($p = 0.540$). No se rechaza $H_0$.
+- **Durbin-Watson:** $d = 1.18$.
+
+### Conclusión
+
+![Doble Media Móvil: ajuste y pronóstico extramuestral](../figs/04_fin.png){width=80%}
+
+La ventana óptima resultó en $k=2$. El modelo extramuestral ($h=12$) tuvo un MAD de 6.08 (MAPE 2.87%), sin lograr batir al ingenuo estricto (MAD de 4.44, MASE de 1.36). Esto se debe a que la ventana tan pequeña es altamente reactiva al ruido.
+
+### Recomendación
+
+Útil para administradores de red a muy corto plazo ($h=1$ a $h=3$ minutos) para proveer ancho de banda. No se recomienda a largo plazo: el modelo proyecta una pendiente recta basada en los últimos 2 minutos, perdiendo el rumbo tras $h=5$ y acumulando un error promedio de 6 usuarios por minuto.
+
+---
+
+## 5. Tendencia Lineal
+
+```{r}
+#| label: m05-tend-lineal
+#| eval: false
+ejecutar_protocolo("austres", datasets::austres, "Australian Bureau of Statistics", "Miles de residentes",
+                   "ajustar_tendencia", "Tendencia Lineal", p_params = 2, prefijo = "05",
+                   es_tendencia = TRUE, tipo_tend = "lineal")
+```
+
+### Descripción de la serie
+
+`austres` registra residentes australianos. Frecuencia trimestral, $N = 89$.
+
+![austres: serie original y correlograma](../figs/05_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+**Ljung-Box (Serie, $p=0$):** $Q_{24} = 953.44$ ($p = 0$). Se rechaza $H_0$. Fuerte tendencia lineal determinística.
+
+### Inferencia sobre coeficientes MCO (HAC)
+
+Se contrasta $H_0: \beta_j = 0$ con errores robustos (núcleo de Bartlett) debido a la autocorrelación residual que invalida los valores p ordinarios.
+
+- **Intercepto ($\beta_0$):** $t_{rob} = 318.25$, $p = 0$. Se rechaza $H_0$.
+- **Pendiente ($\beta_1$):** $t_{rob} = 48.33$, $p = 0$. Se rechaza $H_0$.
+
+### Validación de errores ($N = 77$)
+
+![Tendencia Lineal: diagnóstico de los errores](../figs/05_err.png){width=90%}
+
+- **Prueba t de media cero:** $t \approx 0$ ($gl=76$, $p = 1$). No se rechaza $H_0$.
+- **Ljung-Box (Errores, $m=19, p=2$):** $Q_{17} = 399.46$ ($p = 0$). Se rechaza $H_0$. Estructura residual no capturada.
+- **Jarque-Bera:** $JB = 4.23$ ($p = 0.120$). No se rechaza $H_0$.
+- **Durbin-Watson:** $d = 0.017$.
+
+### Conclusión
+
+![Tendencia Lineal: ajuste y pronóstico extramuestral](../figs/05_fin.png){width=80%}
+
+Ajuste por MCO. En validación ($h=12$), el modelo tuvo un MAD de 210.08 (MAPE 1.20%), empatando prácticamente con el método ingenuo (MASE de 1.0017). Se cumplen media cero y normalidad, pero la fuerte autocorrelación sugiere componentes estacionales ignorados.
+
+### Recomendación
+
+Sirve para proyecciones demográficas del Estado. Confiable hasta $h=8$ trimestres por su bajo MAPE (1.20%). Límite: es una línea recta infinita; asume que el crecimiento (50.7 mil residentes trimestrales) no tiene capacidad de carga.
+
+---
+
+## 6. Tendencia Cuadrática
+
+```{r}
+#| label: m06-tend-cuadratica
+#| eval: false
+ejecutar_protocolo("airmiles", datasets::airmiles, "Box & Jenkins", "Millas (millones)",
+                   "ajustar_tendencia", "Tendencia Cuadratica", p_params = 3, prefijo = "06",
+                   es_tendencia = TRUE, tipo_tend = "cuadratica")
+```
+
+### Descripción de la serie
+
+Millas voladas en millones. Frecuencia anual, $N = 24$.
+
+![airmiles: serie original y correlograma](../figs/06_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+Aceleración evidente en la historia. (La prueba de Ljung-Box de la serie es incomputable por ser $N=24$ con $m=24$).
+
+### Inferencia sobre coeficientes MCO (HAC)
+
+- **Intercepto:** $t_{rob} = 2.74$, $p = 0.013$.
+- **Pendiente ($\beta_1$):** $t_{rob} = -3.17$, $p = 0.005$.
+- **Curvatura ($\beta_2$):** $t_{rob} = 10.81$, $p < 0.001$. Curvatura significativa.
+
+### Validación de errores ($N = 20$)
+
+![Tendencia Cuadrática: diagnóstico de los errores](../figs/06_err.png){width=90%}
+
+- **Prueba t de media cero:** $t = -2.48 \times 10^{-15}$ ($p = 1$). No se rechaza $H_0$.
+- **Ljung-Box (Errores, $m=5, p=3$):** $Q_2 = 13.63$ ($p = 0.001$). Se rechaza $H_0$.
+- **Jarque-Bera (asintótica):** Advertencia: al tener $N \le 20$, la prueba asintótica pierde potencia. $JB = 1.53$ ($p = 0.46$). No se rechaza la normalidad aparente.
+- **Durbin-Watson:** $d = 0.84$.
+
+### Conclusión
+
+![Tendencia Cuadrática: ajuste y pronóstico extramuestral](../figs/06_fin.png){width=80%}
+
+Se ajustó un polinomio de grado 2 ($h=4$). Obtuvo un MAD de 1408.8 (MAPE 5.09%), sin superar por poco al ingenuo (MASE 1.205, por la agresiva aceleración real al final de la serie).
+
+### Recomendación
+
+Ideal para aerolíneas planeando compra de flotas en los años dorados de la aviación. Sirve hasta $h=3$. Límite: las funciones cuadráticas crecen sin control rápidamente, perdiendo sentido si se proyectan 10 años adelante.
+
+---
+
+## 7. Tendencia Exponencial
+
+```{r}
+#| label: m07-tend-exponencial
+#| eval: false
+ejecutar_protocolo("JohnsonJohnson", datasets::JohnsonJohnson, "Shumway & Stoffer", "Ganancia por accion ($)",
+                   "ajustar_tendencia", "Tendencia Exponencial", p_params = 2, prefijo = "07",
+                   es_tendencia = TRUE, tipo_tend = "exponencial", corregir_ses = TRUE)
+```
+
+### Descripción de la serie
+
+Ganancia trimestral por acción de Johnson & Johnson. $N = 84$.
+
+![JohnsonJohnson: serie original y correlograma](../figs/07_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+**Ljung-Box (Serie, $p=0$):** $Q_{24} = 696.29$ ($p = 0$). Se rechaza $H_0$. Varianza heterocedástica dependiente del nivel.
+
+### Inferencia sobre coeficientes MCO (HAC)
+
+- **Intercepto:** $t_{rob} = -16.36$, $p = 0$.
+- **Tasa ($\beta_1$):** $t_{rob} = 42.96$, $p = 0$. Crecimiento porcentual robusto.
+
+### Validación de errores ($N = 72$)
+
+![Tendencia Exponencial: diagnóstico de los errores](../figs/07_err.png){width=90%}
+
+- **Prueba t de media cero:** $t = -0.369$ ($gl=71$, $p = 0.71$). No se rechaza $H_0$.
+- **Ljung-Box (Errores, $m=18, p=2$):** $Q_{16} = 108.20$ ($p = 0$). Se rechaza $H_0$.
+- **Jarque-Bera:** $JB = 135.08$ ($p = 0$). Se rechaza $H_0$ (excesiva asimetría).
+- **Durbin-Watson:** $d = 1.25$.
+
+### Conclusión
+
+![Tendencia Exponencial: ajuste y pronóstico extramuestral](../figs/07_fin.png){width=80%}
+
+Ajuste sobre el logaritmo con corrección obligatoria del sesgo multiplicativo. El MAD extramuestral ($h=12$) fue 1.88 (MAPE 16.91%). No superó al ingenuo estacional (MASE 3.58). El modelo capturó bien la envolvente, pero falló en la altísima estacionalidad cíclica, lo que causa autocorrelación fuerte y no normalidad.
+
+### Recomendación
+
+Útil para inversionistas que miden crecimiento de largo plazo. Su límite es la ceguera estacional: yerra por 1.88 USD en la ganancia trimestral porque promedia los picos y valles anuales.
+
+---
+
+## 8. Holt Lineal
+
+```{r}
+#| label: m08-holt
+#| eval: false
+ejecutar_protocolo("LakeHuron", datasets::LakeHuron, "Brockwell & Davis", "Nivel en pies",
+                   "ajustar_holt", "Holt Lineal", p_params = 2, prefijo = "08",
+                   param_rejilla = expand.grid(seq(0.05, 0.95, by = 0.05), seq(0.05, 0.95, by = 0.05)))
+```
+
+### Descripción de la serie
+
+Nivel del lago Hurón en pies. Frecuencia anual, $N = 98$.
+
+![LakeHuron: serie original y correlograma](../figs/08_ini.png){width=80%}
+
+### Lectura del patrón inicial
+
+**Ljung-Box (Serie, $p=0$):** $Q_{24} = 203.23$ ($p = 0$). Se rechaza $H_0$. Fluctuación con tendencia bajista estocástica (no determinística).
+
+### Validación de errores ($N = 85$)
+
+![Holt Lineal: diagnóstico de los errores](../figs/08_err.png){width=90%}
+
+- **Prueba t de media cero:** $t = 0.049$ ($gl=84$, $p = 0.960$). No se rechaza $H_0$.
+- **Ljung-Box (Errores, $m=21, p=2$):** $Q_{19} = 29.15$ ($p = 0.063$). No se rechaza $H_0$. Errores independientes al 5%.
+- **Jarque-Bera:** $JB = 2.41$ ($p = 0.298$). No se rechaza $H_0$. Errores normales.
+- **Durbin-Watson:** $d = 1.51$.
+
+### Conclusión
+
+![Holt Lineal: ajuste y pronóstico extramuestral](../figs/08_fin.png){width=80%}
+
+Tras la búsqueda en rejilla, se obtuvieron constantes óptimas $\alpha = 0.95$ y $\beta = 0.05$. En validación ($h=12$), logró un MAPE de apenas 0.20% (MAD de 1.20). Pese a la precisión, el ingenuo fue superior (MAD 0.57, MASE 2.09). Holt logró limpiar los residuales, obteniendo independencia, normalidad y media cero.
+
+### Recomendación
+
+Sirve a administradores de recursos hídricos. Funciona bien en plazos medianos ($h=5$) gracias a su lenta actualización de la tendencia ($\beta=0.05$). Su límite es la extrema aleatoriedad climática del lago: se desfasa en promedio 1.2 pies frente a fenómenos atípicos de precipitación.
+
+---
+
+## Bloques de verificación
+
+Se verifica, sobre una serie simulada de ruido blanco ($n = 100$, semilla 2026), que las implementaciones propias coinciden con las funciones de R: la ACF manual frente a `stats::acf()`, el estadístico de Ljung-Box frente a `Box.test()`, la equivalencia del SES en su forma de promedio ponderado y de corrección del error, los coeficientes MCO frente a `lm()`, y las ecuaciones de nivel y pendiente de Holt en su forma de corrección del error.
+
+```{r}
+#| label: verificacion
+#| echo: false
+#| comment: ""
+inicio_verif <- grep("BLOQUES DE VERIFICACION", salida_ejemplos) - 1
+cat(salida_ejemplos[inicio_verif:length(salida_ejemplos)], sep = "\n")
+```
