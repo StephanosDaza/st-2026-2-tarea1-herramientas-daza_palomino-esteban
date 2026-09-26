@@ -1116,15 +1116,28 @@ Este pronóstico no le sirve a nadie para planear: una aerolínea que lo usara s
 #| echo: false
 #| results: asis
 param_txt <- function(ej) {
-  if (is.null(ej$optimizacion)) return("Ninguno")
-  op <- ej$optimizacion$optimo
-  pars <- setdiff(names(op), "mse")
-  paste(paste0(pars, " = ", sapply(pars, function(p) op[[p]])), collapse = ", ")
+  simb <- c(k = "k", alpha = "\\alpha", beta = "\\beta",
+            beta_0 = "\\hat\\beta_0", beta_1 = "\\hat\\beta_1", beta_2 = "\\hat\\beta_2",
+            a = "\\hat a", theta = "\\hat\\theta")
+  fmt <- function(x) format(signif(x, 5), scientific = FALSE)
+  if (!is.null(ej$optimizacion)) {
+    op <- ej$optimizacion$optimo
+    pars <- setdiff(names(op), "mse")
+    return(paste0("$", simb[pars], " = ", sapply(pars, function(p) fmt(op[[p]])), "$", collapse = ", "))
+  }
+  if (!is.null(ej$parametros$tabla)) {
+    tb <- ej$parametros$tabla
+    return(paste0("$", simb[rownames(tb)], " = ", sapply(tb$Estimacion, fmt), "$", collapse = ", "))
+  }
+  "Ninguno"
 }
+nombres <- c(ej01 = "Media simple", ej02 = "Media móvil", ej03 = "Suavizamiento exponencial simple",
+             ej04 = "Doble media móvil", ej05 = "Tendencia lineal", ej06 = "Tendencia cuadrática",
+             ej07 = "Tendencia exponencial", ej08 = "Holt lineal", ej09 = "Media simple (contraejemplo)")
 filas <- sapply(names(resultados), function(n) {
   ej <- resultados[[n]]
   supera <- if (ej$medidas_out[["MAD"]] < ej$medidas_referente_out[["MAD"]]) "Sí" else "No"
-  paste0("| ", as.integer(sub("ej", "", n)), " | ", ej$metodo, " | `", ej$serie, "` | ", param_txt(ej), " | ",
+  paste0("| ", as.integer(sub("ej", "", n)), " | ", nombres[[n]], " | `", ej$serie, "` | ", param_txt(ej), " | ",
          formatC(ej$medidas_out[["MAD"]], digits = 3, format = "f"), " | ",
          formatC(ej$medidas_referente_out[["MAD"]], digits = 3, format = "f"), " | ",
          formatC(ej$medidas_out[["MASE"]], digits = 3, format = "f"), " | ", supera, " |")
